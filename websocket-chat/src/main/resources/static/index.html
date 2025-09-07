@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spring Boot WebSocket Chat</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Load SockJS and STOMP clients from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --secondary-color: #f3f4f6;
+            --text-color: #1f2937;
+            --background-color: #ffffff;
+            --border-color: #e5e7eb;
+            --success-color: #10b981;
+            --info-color: #6b7280;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--secondary-color);
+            color: var(--text-color);
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .hidden { display: none !important; }
+        #username-page, #chat-page {
+            width: 100%;
+            max-width: 600px;
+            background-color: var(--background-color);
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            border-radius: 0.75rem;
+            overflow: hidden;
+        }
+        .username-page-container, .chat-container {
+            padding: 2rem;
+        }
+        h1, h2 {
+            color: var(--text-color);
+            font-weight: 700;
+            margin-top: 0;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        input[type="text"] {
+            width: calc(100% - 2rem);
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #2563eb;
+        }
+        #chat-page {
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+            max-height: 700px;
+        }
+        .chat-header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .chat-header h2 {
+            color: white;
+            margin: 0;
+            font-size: 1.25rem;
+        }
+        #messageArea {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            list-style-type: none;
+            margin: 0;
+        }
+        .chat-message {
+            margin-bottom: 1rem;
+            display: flex;
+        }
+        .chat-message .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 1rem;
+            flex-shrink: 0;
+        }
+        .chat-message .message-content {
+            background-color: var(--secondary-color);
+            padding: 0.75rem 1rem;
+            border-radius: 0.75rem;
+            max-width: 75%;
+        }
+        .chat-message .sender {
+            font-weight: 600;
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+        .event-message {
+            text-align: center;
+            color: var(--info-color);
+            font-style: italic;
+            margin-bottom: 1rem;
+        }
+        #messageForm {
+            display: flex;
+            padding: 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+        #messageForm input {
+            flex-grow: 1;
+            margin-right: 1rem;
+        }
+        #messageForm button {
+            width: auto;
+        }
+    </style>
+</head>
+<body>
+
+<noscript>
+    <h2>Sorry! Your browser does not support JavaScript.</h2>
+</noscript>
+
+<div id="username-page">
+    <div class="username-page-container">
+        <h1 class="title">Enter your name to chat</h1>
+        <form id="usernameForm" name="usernameForm">
+            <div class="form-group">
+                <input type="text" id="name" placeholder="Username" autocomplete="off" class="form-control" />
+            </div>
+            <div class="form-group">
+                <button type="submit" class="accent username-submit">Start Chatting</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="chat-page" class="hidden">
+    <div class="chat-header">
+        <h2>Real-Time Chat Room</h2>
+    </div>
+    <ul id="messageArea">
+        <!-- Chat messages will be appended here -->
+    </ul>
+    <form id="messageForm" name="messageForm" class="chat-form">
+        <div class="form-group">
+            <input type="text" id="message" placeholder="Type a message..." autocomplete="off" class="form-control"/>
+        </div>
+        <button type="submit" class="primary">Send</button>
+    </form>
+</div>
+
+<script>
+    'use strict';
+
+    // Select DOM elements
+    const usernamePage = document.querySelector('#username-page');
+    const chatPage = document.querySelector('#chat-page');
+    const usernameForm = document.querySelector('#usernameForm');
+    const messageForm = document.querySelector('#messageForm');
+    const messageInput = document.querySelector('#message');
+    const messageArea = document.querySelector('#messageArea');
+    const connectingElement = document.createElement('li');
+    connectingElement.className = 'event-message';
+    connectingElement.textContent = 'Connecting...';
+
+    let stompClient = null;
+    let username = null;
+
+    const colors = [
+        '#2196F3', '#32c787', '#00BCD4', '#ff5652',
+        '#ffc107', '#ff85af', '#FF9800', '#39bbb0'
+    ];
+
+    // --- Main Connect Function ---
+    function connect(event) {
+        username = document.querySelector('#name').value.trim();
+
+        if (username) {
+            usernamePage.classList.add('hidden');
+            chatPage.classList.remove('hidden');
+
+            const socket = new SockJS('/ws');
+            stompClient = Stomp.over(socket);
+
+            stompClient.connect({}, onConnected, onError);
+        }
+        event.preventDefault();
+    }
+
+    function onConnected() {
+        // Subscribe to the Public Topic
+        stompClient.subscribe('/topic/public', onMessageReceived);
+
+        // Tell your username to the server
+        stompClient.send("/app/chat.addUser",
+            {},
+            JSON.stringify({sender: username, type: 'JOIN'})
+        )
+
+        connectingElement.remove();
+    }
+
+    function onError(error) {
+        connectingElement.textContent = 'Could not connect to WebSocket server. Please refresh this page to try again!';
+        connectingElement.style.color = 'red';
+        messageArea.appendChild(connectingElement);
+    }
+
+    // --- Send Message Function ---
+    function sendMessage(event) {
+        const messageContent = messageInput.value.trim();
+
+        if (messageContent && stompClient) {
+            const chatMessage = {
+                sender: username,
+                content: messageInput.value,
+                type: 'CHAT'
+            };
+            stompClient.send("/app/chat.sendMessage", {}, JSON.stringify(chatMessage));
+            messageInput.value = '';
+        }
+        event.preventDefault();
+    }
+
+    // --- Message Received Handler ---
+    function onMessageReceived(payload) {
+        const message = JSON.parse(payload.body);
+        const messageElement = document.createElement('li');
+
+        if (message.type === 'JOIN' || message.type === 'LEAVE') {
+            messageElement.classList.add('event-message');
+            message.content = message.sender + (message.type === 'JOIN' ? ' joined!' : ' left!');
+             messageElement.textContent = message.content;
+        } else { // 'CHAT' message
+            messageElement.classList.add('chat-message');
+
+            const avatarElement = document.createElement('div');
+            avatarElement.classList.add('avatar');
+            const avatarText = document.createTextNode(message.sender[0]);
+            avatarElement.appendChild(avatarText);
+            avatarElement.style['background-color'] = getAvatarColor(message.sender);
+            messageElement.appendChild(avatarElement);
+
+            const messageContentElement = document.createElement('div');
+            messageContentElement.classList.add('message-content');
+
+            const senderElement = document.createElement('span');
+            senderElement.classList.add('sender');
+            senderElement.appendChild(document.createTextNode(message.sender));
+            messageContentElement.appendChild(senderElement);
+
+            const textElement = document.createElement('p');
+            textElement.appendChild(document.createTextNode(message.content));
+            messageContentElement.appendChild(textElement);
+
+            messageElement.appendChild(messageContentElement);
+        }
+
+        messageArea.appendChild(messageElement);
+        messageArea.scrollTop = messageArea.scrollHeight; // Scroll to the bottom
+    }
+
+    function getAvatarColor(messageSender) {
+        let hash = 0;
+        for (let i = 0; i < messageSender.length; i++) {
+            hash = 31 * hash + messageSender.charCodeAt(i);
+        }
+        const index = Math.abs(hash % colors.length);
+        return colors[index];
+    }
+
+    // Add event listeners
+    usernameForm.addEventListener('submit', connect, true);
+    messageForm.addEventListener('submit', sendMessage, true);
+
+</script>
+</body>
+</html>
+
